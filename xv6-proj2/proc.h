@@ -50,6 +50,8 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
   int priority;                // Process priority
+  int nice;                    //! nice 추가( 혹시몰라서)
+  struct proc *next;           //! proc 을 ready queue 처럼 사용하기 위해 다음 proc 을 가리키는 pointer 정의
 };
 
 // Process memory is laid out contiguously, low addresses first:
