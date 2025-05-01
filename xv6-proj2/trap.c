@@ -47,16 +47,17 @@ trap(struct trapframe *tf)
   }
 
   switch(tf->trapno){
-  //! timer interrupt case 를 제거해준다.
-  // case T_IRQ0 + IRQ_TIMER:
-  //   if(cpuid() == 0){
-  //     acquire(&tickslock);
-  //     ticks++;
-  //     wakeup(&ticks);
-  //     release(&tickslock);
-  //   }
-  //   lapiceoi();
-  //   break;
+  //! timer interrupt 이긴 하지만 yield() 를 안하고 다른 기능을 하는 부분 인 듯 해서 주석처리 하지 않는다.
+  case T_IRQ0 + IRQ_TIMER:
+    if(cpuid() == 0){
+      acquire(&tickslock);
+      ticks++;
+      wakeup(&ticks);
+      release(&tickslock);
+    }
+    lapiceoi();
+    break;
+
   case T_IRQ0 + IRQ_IDE:
     ideintr();
     lapiceoi();
