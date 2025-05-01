@@ -7,6 +7,60 @@
 #include "proc.h"
 #include "spinlock.h"
 
+//! proc struct 를 readyqueue 로 활용하기 위한 head 주소 지정.
+static struct proc *readyqueue_head = 0;
+
+//! enqueue:
+void enqueue(struct proc *p) {
+  
+  struct proc **current = &readyqueue_head;
+
+  while (*current) {
+    // 우선순위 값이 더 큰 걸 발견하거나
+    // 우선순위 값이 같다면, pid 값이 작은 걸 발견시 
+    // 그 위치에 삽입
+    // 아니면 다음 current 로 이동.
+    if ((*current)->priority > p->priority)
+      break;
+    else if ((*current)->priority == p->priority && (*current)->pid < p->pid)
+      break;
+    else
+      current = &(*current)->next;
+  }
+  // p -> current 
+  p->next = *current; 
+  // current이전노드 -> p
+  *current = p; 
+  // current이전노드 -> p -> current 연결 완료.
+}
+// ! dequeue : head node 반환
+struct proc* dequeue(void) {
+  // 아무것도 없으면 retrun 0
+  if (!readyqueue_head) 
+    return 0;
+  
+  struct proc *first_proc = readyqueue_head;
+  readyqueue_head = first_proc->next; // 두번째 proc 을 readyqueue_head 가 가리키도록 설정
+  first_proc->next = 0; // first_proc 의 next 는 초기화하여 readyqueue 와 떨어뜨리기
+  return first_proc; 
+}
+
+// ! removequeue: dequeue 가 선두를 내보냈다면 이 함수는 특정 위치를 제거. ex) kill 할 때 사용.
+void remove_from_readyqueue(struct proc *p) {
+  
+  struct proc **current = &readyqueue_head;
+
+  while (*current) {
+    // 찾고자하는 proc 찾기.
+    if (*current == p) { 
+      *current = p->next; // readyqueue 끼리 연결
+      p->next = 0; // p->next 는 끊어준다. 별도의 mem free 는 안해줘도 된다고 한다. ptable 에서 관리하므로.
+      return;
+    }
+    current = &(*current)->next; // 다음 current
+  }
+}
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -151,7 +205,7 @@ userinit(void)
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
-
+  enqueue(p); //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
   release(&ptable.lock);
 }
 
@@ -213,11 +267,12 @@ fork(void)
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
   pid = np->pid;
-
+  
+  
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
-
+  enqueue(np); //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
   release(&ptable.lock);
 
   return pid;
@@ -388,7 +443,14 @@ void
 yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
-  myproc()->state = RUNNABLE;
+  // original code: 
+  // myproc()->state = RUNNABLE; 
+  // -------------------------
+  // changed version! 
+  struct proc *curproc = myproc(); //! ready queue 에 넣기 위해 객체 선언
+  curproc->state = RUNNABLE; 
+  enqueue(curproc); //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
+  // ------------------
   sched();
   release(&ptable.lock);
 }
@@ -440,6 +502,7 @@ sleep(void *chan, struct spinlock *lk)
   // Go to sleep.
   p->chan = chan;
   p->state = SLEEPING;
+  removequeue?//!
 
   sched();
 
@@ -464,6 +527,7 @@ wakeup1(void *chan)
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == SLEEPING && p->chan == chan)
       p->state = RUNNABLE;
+      enqueue(p); //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
 }
 
 // Wake up all processes sleeping on chan.
@@ -490,6 +554,7 @@ kill(int pid)
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING)
         p->state = RUNNABLE;
+        enqueue(p); //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
       release(&ptable.lock);
       return 0;
     }
@@ -509,7 +574,7 @@ procdump(void)
   [UNUSED]    "unused",
   [EMBRYO]    "embryo",
   [SLEEPING]  "sleep ",
-  [RUNNABLE]  "runble",
+  [RUNNABLE]  "runble", // 오타난듯.
   [RUNNING]   "run   ",
   [ZOMBIE]    "zombie"
   };
