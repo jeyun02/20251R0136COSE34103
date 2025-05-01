@@ -121,6 +121,11 @@ int             wait(void);
 void            wakeup(void*);
 void            yield(void);
 int             setnice(int,int);
+//! proc.c 에 함수 추가했으니 defs.h에도 선언
+void            enqueue(struct proc *p);  
+struct proc*    dequeue(void);            
+void            remove_from_readyqueue(struct proc *p);
+
 
 // swtch.S
 void            swtch(struct context**, struct context*);
