@@ -255,6 +255,10 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
+  //! fork 시 priority 를 설정하는 요구사항 R1 에 따라 추가함.
+  // parents priority 가 15이상이면 /2, 그외는 +1 로 child priority 를 설정한다.
+  // 이때, 입력은 정수일것이고, 정수 를 2로 나누면 홀수의 경우 x.5가 나와 소숫점아래가 버려지기 때문에 소수부분은 버린다는 요구사항 만족함!
+  np->priority = (curproc->priority >= 15) ? (curproc->priority / 2) : (curproc->priority + 1);
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
@@ -502,8 +506,7 @@ sleep(void *chan, struct spinlock *lk)
   // Go to sleep.
   p->chan = chan;
   p->state = SLEEPING;
-  removequeue?//!
-
+  remove_from_readyqueue(p); // !RUNNABLE 에서 벗어나면 readyqueue 에서 제거.
   sched();
 
   // Tidy up.
