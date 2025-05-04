@@ -7,59 +7,58 @@
 #include "proc.h"
 #include "spinlock.h"
 
-//! proc struct 를 readyqueue 로 활용하기 위한 head 주소 지정.
+// Ready queue head
 static struct proc *readyqueue_head = 0;
 
-//! enqueue:
+// Enqueue: Insert process into ready queue based on priority and PID
 void enqueue(struct proc *p) {
-  
   struct proc **current = &readyqueue_head;
 
   while (*current) {
-    // 우선순위 값이 더 큰 걸 발견하거나
-    // 우선순위 값이 같다면, pid 값이 작은 걸 발견시 
-    // 그 위치에 삽입
-    // 아니면 다음 current 로 이동.
-    if ((*current)->priority > p->priority)
+    if ((*current)->priority > p->priority) // p 의 priority 값이 작다! 바로 삽입.
       break;
-    else if ((*current)->priority == p->priority && (*current)->pid < p->pid)
+    else if ((*current)->priority == p->priority && (*current)->pid < p->pid) // tiebreak: priority 값은 같은데 pid 값이 크다! 바로 삽입.
       break;
     else
       current = &(*current)->next;
   }
-  // p -> current 
-  p->next = *current; 
-  // current이전노드 -> p
-  *current = p; 
-  // current이전노드 -> p -> current 연결 완료.
-}
-// ! dequeue : head node 반환
-struct proc* dequeue(void) {
-  // 아무것도 없으면 retrun 0
-  if (!readyqueue_head) 
-    return 0;
-  
-  struct proc *first_proc = readyqueue_head;
-  readyqueue_head = first_proc->next; // 두번째 proc 을 readyqueue_head 가 가리키도록 설정
-  first_proc->next = 0; // first_proc 의 next 는 초기화하여 readyqueue 와 떨어뜨리기
-  return first_proc; 
+
+  // enqueue(p) 핵심 삽이ㅣㅂ 
+  p->next = *current;
+  *current = p;
 }
 
-// ! removequeue: dequeue 가 선두를 내보냈다면 이 함수는 특정 위치를 제거. ex) kill 할 때 사용.
+// Dequeue: Remove and return the process at the front of the ready queue
+struct proc* dequeue(void) {
+
+  if (!readyqueue_head) { // 비었음.
+    return 0;
+  }
+  struct proc *first = readyqueue_head; 
+  readyqueue_head = first->next; // head 를 차기 proc 에게 넘겨줘야 함.
+  first->next = 0; // return 전 next 를 끊어놔야 함.
+
+  return first;
+}
+
+// Remove a specific process from the ready queue
 void remove_from_readyqueue(struct proc *p) {
-  
+
+  if (p == 0) // p 가 비었음
+    return;
+
   struct proc **current = &readyqueue_head;
 
   while (*current) {
-    // 찾고자하는 proc 찾기.
-    if (*current == p) { 
-      *current = p->next; // readyqueue 끼리 연결
-      p->next = 0; // p->next 는 끊어준다. 별도의 mem free 는 안해줘도 된다고 한다. ptable 에서 관리하므로.
+    if (*current == p) {  // 일치하는 proc 찾으면, current 전후를 연결해서 readyqueue 갱신.
+      *current = p->next; // 
+      p->next = 0;
       return;
     }
-    current = &(*current)->next; // 다음 current
+    current = &(*current)->next;
   }
 }
+
 
 struct {
   struct spinlock lock;
@@ -129,7 +128,6 @@ allocproc(void)
 {
   struct proc *p;
   char *sp;
-
   acquire(&ptable.lock);
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
@@ -205,7 +203,9 @@ userinit(void)
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
-  enqueue(p); //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
+  //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
+  enqueue(p); 
+  //! ---------------------------------------  
   release(&ptable.lock);
 }
 
@@ -236,6 +236,8 @@ growproc(int n)
 int
 fork(void)
 {
+  // cprintf("ENTER fork\n");
+
   int i, pid;
   struct proc *np;
   struct proc *curproc = myproc();
@@ -255,13 +257,16 @@ fork(void)
   np->sz = curproc->sz;
   np->parent = curproc;
   *np->tf = *curproc->tf;
-  //! fork 시 priority 를 설정하는 요구사항 R1 에 따라 추가함.
-  // parents priority 가 15이상이면 /2, 그외는 +1 로 child priority 를 설정한다.
-  // 이때, 입력은 정수일것이고, 정수 를 2로 나누면 홀수의 경우 x.5가 나와 소숫점아래가 버려지기 때문에 소수부분은 버린다는 요구사항 만족함!
-  np->priority = (curproc->priority >= 15) ? (curproc->priority / 2) : (curproc->priority + 1);
+
+  // ! priority 상속 규칙 적용(R1)
+  if(curproc->priority >= 15) 
+    np->priority = curproc->priority / 2;
+  else  
+    np->priority = curproc->priority + 1;
+  //! ------------------------------
 
   // Clear %eax so that fork returns 0 in the child.
-  np->tf->eax = 0;
+  np->tf->eax = 0;  
 
   for(i = 0; i < NOFILE; i++)
     if(curproc->ofile[i])
@@ -271,12 +276,21 @@ fork(void)
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
   pid = np->pid;
-  
-  
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
-  enqueue(np); //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
+  // !RUNNABLE 되면 바로 readyqueue에 넣기
+  enqueue(np); 
+  // ! ---------------------------
+
+  struct proc *top = readyqueue_head;
+  // priority 값이 크면 양보, priority는 같은데 PID 가 작으면 양보
+  if (top && (top->priority < curproc->priority || (top->priority == curproc->priority && top->pid > curproc->pid))) {
+    release(&ptable.lock);
+    yield();
+    acquire(&ptable.lock);
+  }
+  // // ! ---------------------------------
   release(&ptable.lock);
 
   return pid;
@@ -288,6 +302,8 @@ fork(void)
 void
 exit(void)
 {
+  // cprintf("ENTER exit\n");
+
   struct proc *curproc = myproc();
   struct proc *p;
   int fd;
@@ -307,7 +323,6 @@ exit(void)
   iput(curproc->cwd);
   end_op();
   curproc->cwd = 0;
-
   acquire(&ptable.lock);
 
   // Parent might be sleeping in wait().
@@ -324,6 +339,8 @@ exit(void)
 
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
+  //! 좀비되면 제거.
+  remove_from_readyqueue(curproc);
   sched();
   panic("zombie exit");
 }
@@ -333,10 +350,12 @@ exit(void)
 int
 wait(void)
 {
+  // cprintf("ENTER wait\n");
+
   struct proc *p;
   int havekids, pid;
   struct proc *curproc = myproc();
-  
+
   acquire(&ptable.lock);
   for(;;){
     // Scan through table looking for exited children.
@@ -380,74 +399,42 @@ wait(void)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
-// void
-// scheduler(void)
-// {
-//   struct proc *p;
-//   struct cpu *c = mycpu();
-//   c->proc = 0;
-  
-//   for(;;){
-//     // Enable interrupts on this processor.
-//     sti();
 
-//     // Loop over process table looking for process to run.
-//     acquire(&ptable.lock);
-//     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-//       if(p->state != RUNNABLE)
-//         continue;
-
-//       // Switch to chosen process.  It is the process's job
-//       // to release ptable.lock and then reacquire it
-//       // before jumping back to us.
-//       c->proc = p;
-//       switchuvm(p);
-//       p->state = RUNNING;
-
-//       swtch(&(c->scheduler), p->context);
-//       switchkvm();
-
-//       // Process is done running for now.
-//       // It should have changed its p->state before coming back.
-//       c->proc = 0;
-//     }
-//     release(&ptable.lock);
-
-//   }
-// }
 void
 scheduler(void)
 {
   struct cpu *c = mycpu();
-  struct proc *p;
-
   c->proc = 0;
 
   for(;;){
     // Enable interrupts on this processor.
     sti();
+
     acquire(&ptable.lock);
 
-    p = dequeue();// ! for 문 순회하지 말고 바로 readyqueue로부터 dequeue 하여 priority 를 구한다! 나머지는 동일.
-    
-    if(p != 0){ // 에러없이 잘 뽑혔으면 switch 시작.
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
+    // ready queue에서 우선순위가 가장 높은 프로세스 선택
+    struct proc *p = dequeue();
+    // cprintf("[scheduler] pid: %d 의 우선순위가 제일 높다.\n", p->pid);
+
+    if(p){
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
 
+      // 컨텍스트 스위칭 (스케줄러 → 프로세스)
       swtch(&(c->scheduler), p->context);
+
+      // 프로세스 실행 종료 후 커널로 복귀
       switchkvm();
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
+
+      // 프로세스가 yield/sleep/exit 등으로 돌아오면 여기로 복귀
       c->proc = 0;
     }
 
     release(&ptable.lock);
   }
 }
+
 // Enter scheduler.  Must hold only ptable.lock
 // and have changed proc->state. Saves and restores
 // intena because intena is a property of this
@@ -478,6 +465,8 @@ sched(void)
 void
 yield(void)
 {
+  // cprintf("ENTER yield\n");
+  
   acquire(&ptable.lock);  //DOC: yieldlock
   // original code: 
   // myproc()->state = RUNNABLE; 
@@ -485,8 +474,9 @@ yield(void)
   // changed version! 
   struct proc *curproc = myproc(); //! ready queue 에 넣기 위해 객체 선언
   curproc->state = RUNNABLE; 
-  enqueue(curproc); //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
-  // ------------------
+  //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
+  enqueue(curproc); 
+  //! ---------------------------------------  // ------------------
   sched();
   release(&ptable.lock);
 }
@@ -517,8 +507,10 @@ forkret(void)
 void
 sleep(void *chan, struct spinlock *lk)
 {
+
   struct proc *p = myproc();
-  
+  // cprintf("\n[sleep] pid: %d , prio : %d\n", p->pid, p->priority);
+
   if(p == 0)
     panic("sleep");
 
@@ -536,14 +528,14 @@ sleep(void *chan, struct spinlock *lk)
     release(lk);
   }
   // Go to sleep.
+  // !RUNNABLE 에서 벗어나면 readyqueue 에서 제거.
+  // if (p->state == RUNNABLE) remove_from_readyqueue(p); 
+  //! 얘가 문젠거 같은데.
   p->chan = chan;
   p->state = SLEEPING;
-  remove_from_readyqueue(p); // !RUNNABLE 에서 벗어나면 readyqueue 에서 제거.
+
   sched();
-
-  // Tidy up.
   p->chan = 0;
-
   // Reacquire original lock.
   if(lk != &ptable.lock){  //DOC: sleeplock2
     release(&ptable.lock);
@@ -562,11 +554,12 @@ wakeup1(void *chan)
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == SLEEPING && p->chan == chan){
       p->state = RUNNABLE;
-      enqueue(p); //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
+      //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
+      enqueue(p); 
     }
 }
 
-// Wake up all processes sleeping on chan.
+// Wake up all processes sleeping on chan.  
 void
 wakeup(void *chan)
 {
@@ -582,7 +575,6 @@ int
 kill(int pid)
 {
   struct proc *p;
-
   acquire(&ptable.lock);
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid == pid){
@@ -590,7 +582,9 @@ kill(int pid)
       // Wake process from sleep if necessary.
       if(p->state == SLEEPING){
         p->state = RUNNABLE;
-        enqueue(p); //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
+        //! RUNNABLE 로 바뀌는 즉시 ready queue 에 삽입
+        enqueue(p);
+        //! ---------------------------
       }
       release(&ptable.lock);
       return 0;
@@ -640,14 +634,36 @@ procdump(void)
 int
 setnice(int pid, int nice)
 {
-  if( nice < 0 || nice > 30)
+  if (nice < 0 || nice > 30)
     return -1;
 
   struct proc *p;
   acquire(&ptable.lock);
-  for( p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    if(p->pid==pid){
+
+  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if (p->pid == pid) {
+      // RUNNABLE 상태면 readyqueue에서 일단 제거
+      if (p->state == RUNNABLE)
+        remove_from_readyqueue(p);
+
+      // setnice 핵심
       p->priority = nice;
+
+      // RUNNABLE 이면 다시 readyqueue에 삽입
+      if (p->state == RUNNABLE)
+        enqueue(p);
+      // 현재 실행 중인 프로세스가 자기 자신이고 
+      // readyqueue의 top이 더 높은 priority라면 yield함. 선점식으로
+      if (p == myproc() && p->state == RUNNING) {
+        struct proc *top = readyqueue_head;
+        // priority 값이 크면 양보, priority는 같은데 PID 가 작으면 양보
+        if (top && (top->priority < p->priority || (top->priority == p->priority && top->pid < p->pid))) {
+          release(&ptable.lock);  // yield 전에   release! 해야 panic 안 걸림
+          yield();
+          return 0;
+        }
+      }
+
       release(&ptable.lock);
       return 0;
     }
