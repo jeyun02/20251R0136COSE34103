@@ -86,6 +86,7 @@ kfree(char *v)
     release(&kmem.lock);
 }
 
+
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
@@ -117,19 +118,24 @@ freemem(void)
 uint
 get_refcount(uint pa)
 {
+  //debug
+  // cprintf("[DEBUG] 00 get_refcount: pa=0x%x\n", pa);
   return pmem.refcount[pa >> PGSHIFT];
 }
 
 void
 inc_refcount(uint pa)
 {
+  //debug
+  // cprintf("[DEBUG] ++ inc_refcount : pa=0x%x\n", pa);
   pmem.refcount[pa >> PGSHIFT]++;
-
 }
 
 void
 dec_refcount(uint pa)
 {
+  //debug
+  // cprintf("[DEBUG] -- dec_refcount : pa=0x%x\n", pa);
   if (pmem.refcount[pa >> PGSHIFT] > 0)
     pmem.refcount[pa >> PGSHIFT]--;
   else

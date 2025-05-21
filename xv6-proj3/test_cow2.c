@@ -24,7 +24,7 @@ main(int argc, char **argv)
 	if(before == after)
 		printf(1, "OK\n");
 	else
-		printf(1, "WRONG\n");
+		printf(1, "WRONG\n before: %d, after: %d\n", before, after);
 
 	exit();
 }
