@@ -182,8 +182,7 @@ switchuvm(struct proc *p)
 void
 inituvm(pde_t *pgdir, char *init, uint sz)
 {
-  //debugging print
-  // cprintf("[DEBUG] inituvm()\n");
+
   char *mem;
 
   if(sz >= PGSIZE)
@@ -201,8 +200,7 @@ inituvm(pde_t *pgdir, char *init, uint sz)
 int
 loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
 {
-  //debugging print
-  // cprintf("[DEBUG] loaduvm()\n");
+
   uint i, pa, n;
   pte_t *pte;
 
@@ -215,7 +213,7 @@ loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
     
     /* allocuvm()에서 페이지를 미리 할당하고 매핑했다 하더라도,
       loaduvm()은 실행파일의 섹션을 페이지에 읽어들이는 곳이라서,
-      해당 물리 페이지는 이 시점부터 논리적으로 '참조 중' 이므로 refcount는 반드시 증가되어야 일관성 유지됨 */
+      해당 물리 페이지는 이 시점부터 논리적으로 '참조 중' 이므로 refcount는 반드시 증가되어야 일관성 유지된다고 함.. */
     inc_refcount(pa);  // ! 추가
     
     if(sz - i < PGSIZE)
@@ -233,8 +231,6 @@ loaduvm(pde_t *pgdir, char *addr, struct inode *ip, uint offset, uint sz)
 int
 allocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 {
-  // cprintf("[DEBUG] allocuvm()\n");
-
   char *mem;
   uint a;
 
@@ -312,12 +308,9 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
     pte = walkpgdir(pgdir, (char*)a, 0);
     if(!pte || !(*pte & PTE_P))
       continue;
-
     pa = PTE_ADDR(*pte);
-    *pte = 0;  // 먼저 unmap
-    // cprintf("[DEBUG] deallocuvm() 에서 get 하는 중!\n");
+    *pte = 0;  // 먼저 unmap 시켜줌.
     dec_refcount(pa); // ! refcount 감소 
-
     if(get_refcount(pa) == 0)
       kfree(P2V(pa));
 
@@ -329,8 +322,7 @@ deallocuvm(pde_t *pgdir, uint oldsz, uint newsz)
 void
 freevm(pde_t *pgdir)
 {
-  //debugging print
-  // cprintf("[DEBUG] freevm()\n");
+
   uint i;
 
   if(pgdir == 0)
@@ -345,11 +337,6 @@ freevm(pde_t *pgdir)
       uint pa = PTE_ADDR(pgdir[i]);
 
       //! refcount 감소 -> 결과적으로 안해줌( 아마 deallocuvm()에서 해주기 때문인듯)
-      // cprintf("[DEBUG] freevm()에서 dec!!!\n");
-      // dec_refcount(pa);
-
-      // 참조가 0일 경우에만 실제로 물리 페이지 해제
-      // cprintf("[DEBUG] freevm() 에서 get 하는 중!\n");
 
       if(get_refcount(pa) == 0){
         char *v = P2V(pa);
@@ -381,8 +368,6 @@ clearpteu(pde_t *pgdir, char *uva)
 pde_t*
 copyuvm(pde_t *pgdir, uint sz)
 {
-  //debugging print
-  // cprintf("[DEBUG] copyuvm()\n");
 
   pde_t *d;
   pte_t *pte;
@@ -400,18 +385,14 @@ copyuvm(pde_t *pgdir, uint sz)
     pa = PTE_ADDR(*pte);
     flags = PTE_FLAGS(*pte);
 
-    *pte &= ~PTE_W;  // 부모도 read-only로
-
-    // 디버깅: 어떤 VA, PA가 공유되고 있는지 출력
-    // cprintf("[DEBUG] Mapping VA: 0x%x ---> shared PA: 0x%x\n", i, pa);
-    // cprintf("[DEBUG] Before inc_refcount: PA=0x%x, 이전값=%d\n", pa, get_refcount(pa));
+    *pte &= ~PTE_W;  // 부모도 read-only로 변경.
 
     if(mappages(d, (void*)i, PGSIZE, pa, flags & ~PTE_W) < 0) {
       goto bad;
     }
 
-    inc_refcount(pa); // increment the reference count
-    // cprintf("[DEBUG] inc_refcount: PA=0x%x, 새로운값=%d\n", pa, get_refcount(pa));
+    inc_refcount(pa); // ! 추가
+    
   }
 
   lcr3(V2P(pgdir));  // flush TLB
@@ -467,64 +448,41 @@ copyout(pde_t *pgdir, uint va, void *p, uint len)
 void
 page_fault(void)
 {
-  uint va = rcr2();  // 페이지 폴트가 발생한 가상 주소 읽기
-  // cprintf("[DEBUG] Page fault at VA: 0x%x\n", va);
-  // 음수 주소는 잘못된 접근 (실제로는 unsigned이므로 이 조건은 항상 false일 수 있음)
+  uint va = rcr2();
   if(va < 0){
     panic("Invalid access");
     return;
   }
 
-  // 해당 가상 주소의 페이지 테이블 엔트리(PTE) 가져오기
+  // va의 해당  pte 가져오기
   pte_t *pte = walkpgdir(myproc()->pgdir, (void*)va, 0);
   if (!pte || !(*pte & PTE_P)) {
-    // cprintf("[DEBUG] Invalid PTE or page not present for VA: 0x%x\n", va);
     myproc()->killed = 1;
     return;
   }
-  // cprintf("[DEBUG] Found PTE for VA: 0x%x\n", va);
 
   // 물리 주소 및 플래그 추출
   uint pa = PTE_ADDR(*pte);
   uint flags = PTE_FLAGS(*pte);
-  // cprintf("[DEBUG] Physical address: 0x%x, flags: 0x%x\n", pa, flags);
-
+  // refcount 가져오기
   char *mem;
-
-  // 참조 카운트 확인
-  // cprintf("[DEBUG] page_fault() 에서 get 하는 중!\n");
-
-  int ref = get_refcount(pa);
-  // cprintf("[DEBUG] Reference count for PA 0x%x: %d\n", pa, ref);
+  int ref = get_refcount(pa); 
 
   if (ref > 1) {
-    // 페이지 공유 중 → 복사 필요
-    // cprintf("[DEBUG] Performing Copy-on-Write for VA: 0x%x\n", va);
-
+    // 페이지 둘 이상 공유 중 → 복사 필요!!
     mem = kalloc();
-    if (mem == 0) {
-      cprintf("[ERROR] Out of memory during CoW allocation\n");
-      myproc()->killed = 1;
-      return;
-    }
-
     // 원래 페이지 내용을 새 페이지로 복사
-    memmove(mem, (char*)P2V(pa), PGSIZE);
+    memmove(mem, (char*)P2V(pa), PGSIZE); 
     inc_refcount(V2P(mem));  // ! 자식 증가
-    dec_refcount(pa); //! 부모 감소?
-
-    // PTE 업데이트: 새 페이지 주소 + 기존 플래그 + 쓰기 가능
-    *pte = V2P(mem) | (flags | PTE_W);
-    // cprintf("[DEBUG] CoW: New page mapped at PA: 0x%x\n", V2P(mem));
-  } else {
-    // 참조 카운트가 1이면 그냥 쓰기 가능하게 설정
+    dec_refcount(pa);  //! 부모 감소
+    // PTE update: 새주소 + 기존 플래그 + 쓰기 가능
+    *pte = V2P(mem) | (flags | PTE_W); 
+  } 
+  else {
+    // refcount == 1 인 경우, 그냥 write 로 변경
     *pte |= PTE_W;
-    // cprintf("[DEBUG] Single-owner page: write enabled\n");
   }
-
-  // TLB 플러시로 변경 적용
-  lcr3(V2P(myproc()->pgdir));
-  // cprintf("[DEBUG] TLB flushed for VA: 0x%x\n", va);
+  lcr3(V2P(myproc()->pgdir)); // TLB flush
 }
 
 

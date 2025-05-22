@@ -118,26 +118,20 @@ freemem(void)
 uint
 get_refcount(uint pa)
 {
-  //debug
-  // cprintf("[DEBUG] 00 get_refcount: pa=0x%x\n", pa);
   return pmem.refcount[pa >> PGSHIFT];
 }
 
 void
 inc_refcount(uint pa)
 {
-  //debug
-  // cprintf("[DEBUG] ++ inc_refcount : pa=0x%x\n", pa);
   pmem.refcount[pa >> PGSHIFT]++;
 }
 
 void
 dec_refcount(uint pa)
 {
-  //debug
-  // cprintf("[DEBUG] -- dec_refcount : pa=0x%x\n", pa);
   if (pmem.refcount[pa >> PGSHIFT] > 0)
     pmem.refcount[pa >> PGSHIFT]--;
   else
-    panic("dec_refcount called on a page with refcount 0");
+    panic("dec_refcount called when refcount is 0");
 }

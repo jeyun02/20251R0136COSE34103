@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/perl -w
 
 open(SIG, $ARGV[0]) || die "open $ARGV[0]: $!";
 
