@@ -451,14 +451,11 @@ bmap(struct inode *ip, uint bn)
 
   //DoubleIndirect 
   if(bn < NDOUBLEINDIRECT){
-
     if((addr = ip->addrs[NDIRECT+1]) == 0) // level 1 확인.
       ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
     // ----- level 1 start -----
     bp = bread(ip->dev, addr); 
     a = (uint*)bp->data; 
-    
-    
     if((addr = a[bn / NINDIRECT]) == 0){ // level 2 ㄱ갖고와서 확인
       a[bn / NINDIRECT] = addr = balloc(ip->dev); 
       log_write(bp);
@@ -469,19 +466,16 @@ bmap(struct inode *ip, uint bn)
     // ----- level 2 start -----
     bp = bread(ip->dev, addr);
     a = (uint*)bp->data; // level 2 블록 데이터를 포인터 배열로 
-
-    //  (bn % NINDIRECT가 인덱스)
-    if((addr = a[bn % NINDIRECT]) == 0){
+    if((addr = a[bn % NINDIRECT]) == 0){ //  bn % NINDIRECT 가 인덱스임
       a[bn % NINDIRECT] = addr = balloc(ip->dev); 
       log_write(bp); 
     }
     brelse(bp); // level 2 해제
     // ----- level 2 end -----
-
-    return addr; // 최종 데이터 블록의 주소를 반환
+    return addr; 
   }
 
-  panic("bmap: out of range"); // 파일이 가질 수 있는 최대 블록 범위를 벗어나면 패닉 발생
+  panic("bmap: out of range");
 }
 
 // Truncate inode (discard contents).
@@ -489,35 +483,102 @@ bmap(struct inode *ip, uint bn)
 // to it (no directory entries referring to it)
 // and has no in-memory reference to it (is
 // not an open file or current directory).
+
+// static void
+// itrunc(struct inode *ip)
+// {
+//   int i, j;
+//   struct buf *bp;
+//   uint *a;
+
+//   for(i = 0; i < NDIRECT; i++){
+//     if(ip->addrs[i]){
+//       bfree(ip->dev, ip->addrs[i]);
+//       ip->addrs[i] = 0;
+//     }
+//   }
+
+//   if(ip->addrs[NDIRECT]){
+//     bp = bread(ip->dev, ip->addrs[NDIRECT]);
+//     a = (uint*)bp->data;
+//     for(j = 0; j < NINDIRECT; j++){
+//       if(a[j])
+//         bfree(ip->dev, a[j]);
+//     }
+//     brelse(bp);
+//     bfree(ip->dev, ip->addrs[NDIRECT]);
+//     ip->addrs[NDIRECT] = 0;
+//   }
+
+//   ip->size = 0;
+//   iupdate(ip);
+// }
+
+
+// fs.c
+
+// inode 와 연결된 모~든 데이터 블록 해제 후 파일 크기를 0으로 설정하는 기능. 
 static void
 itrunc(struct inode *ip)
 {
-  int i, j;
-  struct buf *bp;
-  uint *a;
+  int i, j, k;
+  struct buf *bp, *bp2; //bp는 level 1, bp2는 level 2
+  uint *a, *a2; // a는 level 1, a2는 level 2 d용도임.
 
+  // direct 블록 해제 - original code 유지
   for(i = 0; i < NDIRECT; i++){
-    if(ip->addrs[i]){
-      bfree(ip->dev, ip->addrs[i]);
-      ip->addrs[i] = 0;
+    if(ip->addrs[i]){ // 
+      bfree(ip->dev, ip->addrs[i]); //데이터 블록 해제
+      ip->addrs[i] = 0; // inode의 포인터 값을 0으로 초기화
     }
   }
 
+  // single indirect 블록해제 - original code 유지
   if(ip->addrs[NDIRECT]){
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
+    // --- level 1 start ---
     for(j = 0; j < NINDIRECT; j++){
-      if(a[j])
-        bfree(ip->dev, a[j]);
+      if(a[j]) 
+        bfree(ip->dev, a[j]); // 
     }
-    brelse(bp);
-    bfree(ip->dev, ip->addrs[NDIRECT]);
-    ip->addrs[NDIRECT] = 0;
+    brelse(bp); 
+    bfree(ip->dev, ip->addrs[NDIRECT]); 
+    // --- level 1 ends ---
+    ip->addrs[NDIRECT] = 0; //
   }
 
-  ip->size = 0;
+  // double indirect 블록해제
+  if(ip->addrs[NDIRECT+1]){ 
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]); 
+    a = (uint*)bp->data; 
+    // --- level 1 시작 ---
+    for(j = 0; j < NINDIRECT; j++){ 
+      if(a[j]){ 
+        bp2 = bread(ip->dev, a[j]);
+        a2 = (uint*)bp2->data; 
+        // --- level 2 시작 ---
+        for(k = 0; k < NINDIRECT; k++){
+          if(a2[k]) 
+            bfree(ip->dev, a2[k]); // 데이터 블록을 해제
+        }
+        brelse(bp2); 
+        bfree(ip->dev, a[j]); 
+        // --- level 2 끝 ---
+      }
+    }
+    brelse(bp); 
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);
+    // --- level 1 끝 ---
+
+    ip->addrs[NDIRECT+1] = 0; 
+  }
+
+  ip->size = 0; 
   iupdate(ip);
 }
+
+
 
 // Copy stat information from inode.
 // Caller must hold ip->lock.
