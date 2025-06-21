@@ -1,4 +1,5 @@
-#!/usr/bin/perl
+# -w 를 안 붙이면 make qemu-nox 에러 발생.
+#!/usr/bin/perl -w 
 
 open(SIG, $ARGV[0]) || die "open $ARGV[0]: $!";
 
