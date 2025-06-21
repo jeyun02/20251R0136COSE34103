@@ -369,34 +369,119 @@ iunlockput(struct inode *ip)
 
 // Return the disk block address of the nth block in inode ip.
 // If there is no such block, bmap allocates one.
+
+// static uint
+// bmap(struct inode *ip, uint bn)
+// {
+//   /* 
+//     ip: inode. 
+//     bn: block number.
+
+//     addr: the address of the block on disk.
+//     a: pointer to the array of block addresses in an indirect block.
+//     bp: buffer containing the indirect block data.
+//   */
+
+//   uint addr, *a;
+//   struct buf *bp;
+
+//   if(bn < NDIRECT){ // bn이 direct 범위 내에 있는지 확인(0-10) < (NDIRECT=11) 
+//     if((addr = ip->addrs[bn]) == 0)
+//       ip->addrs[bn] = addr = balloc(ip->dev);
+//     return addr;
+//   }
+//   bn -= NDIRECT;
+
+//   if(bn < NINDIRECT){
+//     // Load indirect block, allocating if necessary.
+//     if((addr = ip->addrs[NDIRECT]) == 0)
+//       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
+//     bp = bread(ip->dev, addr);
+//     a = (uint*)bp->data;
+//     if((addr = a[bn]) == 0){
+//       a[bn] = addr = balloc(ip->dev);
+//       log_write(bp);
+//     }
+//     brelse(bp);
+//     return addr;
+//   }
+
+//   panic("bmap: out of range");
+// }
+
+// fs.c
+
+// fs.c
+
+// inode 'ip'의 'bn'번째 데이터 블록 주소를 반환합니다.
+// 만약 해당 블록이 할당되지 않았다면, 새로 할당하고 그 주소를 반환합니다.
 static uint
 bmap(struct inode *ip, uint bn)
 {
   uint addr, *a;
   struct buf *bp;
 
+  //Direct 
   if(bn < NDIRECT){
-    if((addr = ip->addrs[bn]) == 0)
-      ip->addrs[bn] = addr = balloc(ip->dev);
-    return addr;
+    if((addr = ip->addrs[bn]) == 0) 
+      ip->addrs[bn] = addr = balloc(ip->dev); 
+    return addr; 
   }
-  bn -= NDIRECT;
+  bn -= NDIRECT; 
 
-  if(bn < NINDIRECT){
-    // Load indirect block, allocating if necessary.
-    if((addr = ip->addrs[NDIRECT]) == 0)
+  //Single Indirect Block
+  if(bn < NINDIRECT){ // single indirect 범위 인지 확인
+
+    if((addr = ip->addrs[NDIRECT]) == 0) // 아직 할당 안됨
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
+    // ----- level 1 start -----
     bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
-    if((addr = a[bn]) == 0){
+    a = (uint*)bp->data; //bp->data 가 주소 포인터 배열임.
+    
+    if((addr = a[bn]) == 0){ // 할당 안됨
       a[bn] = addr = balloc(ip->dev);
+      log_write(bp); // 로그에 기록
+    }
+    brelse(bp); //해제
+    // ----- level 1 end -----
+
+    return addr; // 최종 주소 반환
+  }
+  bn -= NINDIRECT; //
+
+  //DoubleIndirect 
+  if(bn < NDOUBLEINDIRECT){
+
+    if((addr = ip->addrs[NDIRECT+1]) == 0) // level 1 확인.
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    // ----- level 1 start -----
+    bp = bread(ip->dev, addr); 
+    a = (uint*)bp->data; 
+    
+    
+    if((addr = a[bn / NINDIRECT]) == 0){ // level 2 ㄱ갖고와서 확인
+      a[bn / NINDIRECT] = addr = balloc(ip->dev); 
       log_write(bp);
     }
-    brelse(bp);
-    return addr;
+    brelse(bp); // level 1  해제
+    // ----- level 1 end -----
+
+    // ----- level 2 start -----
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data; // level 2 블록 데이터를 포인터 배열로 
+
+    //  (bn % NINDIRECT가 인덱스)
+    if((addr = a[bn % NINDIRECT]) == 0){
+      a[bn % NINDIRECT] = addr = balloc(ip->dev); 
+      log_write(bp); 
+    }
+    brelse(bp); // level 2 해제
+    // ----- level 2 end -----
+
+    return addr; // 최종 데이터 블록의 주소를 반환
   }
 
-  panic("bmap: out of range");
+  panic("bmap: out of range"); // 파일이 가질 수 있는 최대 블록 범위를 벗어나면 패닉 발생
 }
 
 // Truncate inode (discard contents).
